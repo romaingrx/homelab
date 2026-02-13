@@ -24,12 +24,8 @@ cp "${CERT_DIR}/fullchain.pem" "${UNIFI_CERT_DIR}/unifi-core.crt"
 cp "${CERT_DIR}/key.pem"       "${UNIFI_CERT_DIR}/unifi-core.key"
 chmod 600 "${UNIFI_CERT_DIR}/unifi-core.key"
 
-# Reload unifi-core to pick up new cert
-if systemctl is-active --quiet unifi-core; then
-    systemctl restart unifi-core
-    log_info "Restarted unifi-core"
-else
-    log_warn "unifi-core is not running, skipping restart"
-fi
+# Reload nginx to pick up new cert (do NOT restart unifi-core — it regenerates its own cert)
+nginx -s reload
+log_info "Reloaded nginx"
 
 log_info "Local deploy complete"

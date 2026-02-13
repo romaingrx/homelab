@@ -57,6 +57,7 @@ ts_list_devices() {
 
     echo "${resp}" | jq -c '[.devices[] | {
         hostname: (.hostname // .name | split(".")[0] | ascii_downcase),
-        ipv4: ([.addresses[] | select(startswith("100."))] | first // empty)
+        ipv4: ([.addresses[] | select(startswith("100."))] | first // empty),
+        tags: (.tags // [])
     }] | map(select(.ipv4 != null))'
 }

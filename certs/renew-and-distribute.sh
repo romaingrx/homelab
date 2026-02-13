@@ -79,8 +79,11 @@ skipped=0
     || { log_error "Local deploy failed"; failures=$((failures + 1)); }
 deployed=$((deployed + 1))
 
-# --- Auto-discover and deploy to all remote Tailscale devices ---
+# --- Auto-discover and deploy to all tag:server devices ---
 devices_json=$(ts_list_devices)
+server_devices=$(echo "${devices_json}" | jq -c '[.[] | select(.tags | index("tag:server"))]')
+server_count=$(echo "${server_devices}" | jq 'length')
+log_info "Found ${server_count} devices tagged tag:server"
 
 while IFS= read -r entry; do
     hostname=$(echo "${entry}" | jq -r '.hostname')
@@ -90,9 +93,9 @@ while IFS= read -r entry; do
         continue
     fi
 
-    # Check if SSH is reachable (2s timeout)
-    if ! ssh -o ConnectTimeout=2 -o BatchMode=yes "${hostname}" "true" &>/dev/null; then
-        log_info "Skipping ${hostname} (SSH not reachable)"
+    # Check if SSH is reachable (5s timeout)
+    if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "${hostname}" "true" &>/dev/null; then
+        log_warn "Skipping ${hostname} (SSH not reachable)"
         skipped=$((skipped + 1))
         continue
     fi
@@ -106,7 +109,7 @@ while IFS= read -r entry; do
     "${SCRIPT_DIR}/deploy-remote.sh" "${hostname}" ${receiver} \
         || { log_error "Deploy to ${hostname} failed"; failures=$((failures + 1)); continue; }
     deployed=$((deployed + 1))
-done < <(echo "${devices_json}" | jq -c '.[]')
+done < <(echo "${server_devices}" | jq -c '.[]')
 
 log_info "Deployed to ${deployed} hosts, skipped ${skipped}, failed ${failures}"
 

@@ -23,7 +23,7 @@ load_secrets
 
 CERT_DIR="${HOMELAB_DIR}/certs"
 CERT_NAME="homelab_wildcard"
-API_BASE="http://truenas.internal.romaingrx.com/api/v2.0"
+API_BASE="http://truenas/api/v2.0"
 API_KEY="${TRUENAS_API_KEY:?Missing TRUENAS_API_KEY in .env}"
 
 api() {

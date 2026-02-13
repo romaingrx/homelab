@@ -8,7 +8,7 @@
 #   - Record exists, no device        -> DELETE
 #   - Record matches device           -> SKIP (no-op)
 
-set -euo pipefail
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=config.sh

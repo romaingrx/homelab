@@ -76,9 +76,22 @@ print(json.dumps({
 }))
 ")
 
-# Import certificate
+# Import certificate (API returns a job ID, wait then fetch cert by name)
 log_info "Importing new certificate..."
-NEW_CERT_ID=$(api POST /certificate -d "${PAYLOAD}" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+JOB_ID=$(api POST /certificate -d "${PAYLOAD}")
+log_info "Import job id=${JOB_ID}, waiting..."
+
+# Poll job until complete
+for i in $(seq 1 30); do
+    JOB_STATE=$(api GET "/core/get_jobs?id=${JOB_ID}" | python3 -c "import sys,json; j=json.load(sys.stdin); print(j[0]['state'] if j else 'UNKNOWN')")
+    if [[ "${JOB_STATE}" == "SUCCESS" ]]; then break; fi
+    if [[ "${JOB_STATE}" == "FAILED" ]]; then die "Certificate import job failed"; fi
+    sleep 1
+done
+
+NEW_CERT_ID=$(api GET /certificate | \
+    python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((str(c['id']) for c in certs if c['name']=='${CERT_NAME}'), ''))")
+[[ -n "${NEW_CERT_ID}" ]] || die "Certificate not found after import"
 log_info "Imported certificate id=${NEW_CERT_ID}"
 
 # Set as active UI certificate

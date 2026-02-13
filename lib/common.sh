@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Common utilities: logging, error handling, secrets loading
 
-set -euo pipefail
+set -eo pipefail
 
 HOMELAB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="${HOMELAB_DIR}/logs"

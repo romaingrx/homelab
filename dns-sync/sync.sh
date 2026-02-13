@@ -15,7 +15,7 @@ source "${SCRIPT_DIR}/../lib/tailscale.sh"
 
 load_secrets
 
-HOSTS_FILE="${SCRIPT_DIR}/hosts"
+HOSTS_FILE="${HOMELAB_DIR}/dns-sync/hosts"
 
 log_info "=== DNS sync starting ==="
 

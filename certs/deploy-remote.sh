@@ -3,29 +3,25 @@
 #
 # Usage: deploy-remote.sh <hostname> [receiver-script]
 #
-# Example:
-#   deploy-remote.sh proxmox receivers/proxmox.sh
+# Examples:
+#   deploy-remote.sh proxmox receivers/proxmox.sh   # with host-specific receiver
+#   deploy-remote.sh carl                            # generic: copies to /etc/homelab-certs/
 #
 # This will:
-#   1. SCP fullchain.pem and key.pem to /tmp/homelab-cert/ on the target
-#   2. SCP and execute the receiver script (if provided) on the target
-#   3. Clean up the temp dir on the target
+#   1. SCP fullchain.pem and key.pem to the target
+#   2. If a receiver script is given, run it on the target
+#   3. Otherwise, install certs to /etc/homelab-certs/ on the target
 
-set -euo pipefail
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
 
 CERT_DIR="${HOMELAB_DIR}/certs"
 REMOTE_TMP="/tmp/homelab-cert"
+REMOTE_CERT_DIR="/etc/homelab-certs"
 
-usage() {
-    echo "Usage: $0 <tailscale-hostname> [receiver-script]"
-    echo "  receiver-script: path relative to homelab/ (e.g., receivers/proxmox.sh)"
-    exit 1
-}
-
-[[ $# -ge 1 ]] || usage
+[[ $# -ge 1 ]] || { echo "Usage: $0 <tailscale-hostname> [receiver-script]"; exit 1; }
 TARGET_HOST="$1"
 RECEIVER="${2:-}"
 
@@ -36,15 +32,15 @@ done
 log_info "Deploying cert to ${TARGET_HOST} via Tailscale SSH..."
 
 # Create temp dir on remote
-ssh "${TARGET_HOST}" "mkdir -p ${REMOTE_TMP}" \
-    || die "Cannot SSH to ${TARGET_HOST}. Is Tailscale SSH enabled?"
+ssh -o ConnectTimeout=5 -o BatchMode=yes "${TARGET_HOST}" "mkdir -p ${REMOTE_TMP}" \
+    || die "Cannot SSH to ${TARGET_HOST}"
 
 # Copy cert files
 scp -q "${CERT_DIR}/fullchain.pem" "${CERT_DIR}/key.pem" "${TARGET_HOST}:${REMOTE_TMP}/" \
     || die "Failed to SCP cert files to ${TARGET_HOST}"
 
-# Run receiver script if specified
 if [[ -n "${RECEIVER}" ]]; then
+    # Run host-specific receiver script
     local_receiver="${HOMELAB_DIR}/${RECEIVER}"
     [[ -f "${local_receiver}" ]] || die "Receiver script not found: ${local_receiver}"
 
@@ -53,6 +49,14 @@ if [[ -n "${RECEIVER}" ]]; then
 
     ssh "${TARGET_HOST}" "chmod +x ${REMOTE_TMP}/receiver.sh && ${REMOTE_TMP}/receiver.sh ${REMOTE_TMP}" \
         || die "Receiver script failed on ${TARGET_HOST}"
+else
+    # Generic install: copy to standard location
+    ssh "${TARGET_HOST}" "mkdir -p ${REMOTE_CERT_DIR} && \
+        cp ${REMOTE_TMP}/fullchain.pem ${REMOTE_CERT_DIR}/fullchain.pem && \
+        cp ${REMOTE_TMP}/key.pem ${REMOTE_CERT_DIR}/key.pem && \
+        chmod 644 ${REMOTE_CERT_DIR}/fullchain.pem && \
+        chmod 600 ${REMOTE_CERT_DIR}/key.pem" \
+        || die "Failed to install certs on ${TARGET_HOST}"
 fi
 
 # Clean up

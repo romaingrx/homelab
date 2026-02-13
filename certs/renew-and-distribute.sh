@@ -2,20 +2,28 @@
 # Daily cert renewal orchestrator
 #
 # 1. Run acme.sh --cron to renew if needed (exits 0 even if no renewal)
-# 2. If the cert was renewed (mtime changed), distribute to all hosts
+# 2. If the cert was renewed (mtime changed), distribute to all reachable hosts
+#
+# Remote hosts are auto-discovered from the Tailscale API. For each host:
+#   - Skip if it's the local UDM
+#   - Skip if SSH is unreachable (Tailscale SSH not enabled, offline, etc.)
+#   - If a matching receiver script exists in receivers/<hostname>.sh, use it
+#   - Otherwise just copy the cert files to /etc/homelab-certs/
 #
 # Called by: homelab-cert-renew.timer (daily 3:30 AM)
 
-set -euo pipefail
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
+source "${SCRIPT_DIR}/../lib/tailscale.sh"
 
 load_secrets
 
 ACME_HOME="${HOMELAB_DIR}/.acme.sh"
 CERT_DIR="${HOMELAB_DIR}/certs"
 DOMAIN="internal.romaingrx.com"
+LOCAL_HOSTNAME=$(hostname | tr '[:upper:]' '[:lower:]')
 
 require_cmd "${ACME_HOME}/acme.sh"
 
@@ -63,19 +71,44 @@ fi
 log_info "Certificate renewed, distributing to all hosts..."
 
 failures=0
+deployed=0
+skipped=0
 
 # --- Deploy to local UDM ---
-"${SCRIPT_DIR}/deploy-local.sh" || { log_error "Local deploy failed"; failures=$((failures + 1)); }
+"${SCRIPT_DIR}/deploy-local.sh" \
+    || { log_error "Local deploy failed"; failures=$((failures + 1)); }
+deployed=$((deployed + 1))
 
-# --- Deploy to remote hosts ---
-# Add new hosts here as they are set up.
-# Each deploy is independent — one failure won't block others.
-"${SCRIPT_DIR}/deploy-remote.sh" proxmox receivers/proxmox.sh \
-    || { log_error "Deploy to proxmox failed"; failures=$((failures + 1)); }
+# --- Auto-discover and deploy to all remote Tailscale devices ---
+devices_json=$(ts_list_devices)
 
-# Future hosts (uncomment when ready):
-# "${SCRIPT_DIR}/deploy-remote.sh" carl receivers/proxmox.sh \
-#     || { log_error "Deploy to carl failed"; failures=$((failures + 1)); }
+while IFS= read -r entry; do
+    hostname=$(echo "${entry}" | jq -r '.hostname')
+
+    # Skip self
+    if [[ "${hostname}" == "${LOCAL_HOSTNAME}" ]]; then
+        continue
+    fi
+
+    # Check if SSH is reachable (2s timeout)
+    if ! ssh -o ConnectTimeout=2 -o BatchMode=yes "${hostname}" "true" &>/dev/null; then
+        log_info "Skipping ${hostname} (SSH not reachable)"
+        skipped=$((skipped + 1))
+        continue
+    fi
+
+    # Use host-specific receiver if it exists, otherwise use generic
+    receiver=""
+    if [[ -f "${HOMELAB_DIR}/receivers/${hostname}.sh" ]]; then
+        receiver="receivers/${hostname}.sh"
+    fi
+
+    "${SCRIPT_DIR}/deploy-remote.sh" "${hostname}" ${receiver} \
+        || { log_error "Deploy to ${hostname} failed"; failures=$((failures + 1)); continue; }
+    deployed=$((deployed + 1))
+done < <(echo "${devices_json}" | jq -c '.[]')
+
+log_info "Deployed to ${deployed} hosts, skipped ${skipped}, failed ${failures}"
 
 if [[ "${failures}" -gt 0 ]]; then
     log_error "=== Cert distribution finished with ${failures} failure(s) ==="

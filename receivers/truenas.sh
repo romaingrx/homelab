@@ -1,54 +1,73 @@
 #!/usr/bin/env bash
-# TrueNAS Scale receiver: install wildcard cert for web UI
+# local-receiver
+# TrueNAS Scale receiver: deploy wildcard cert via REST API
 #
-# Called by deploy-remote.sh with: ./receiver.sh /tmp/homelab-cert
+# This is a LOCAL receiver — it runs on the UDM and calls the TrueNAS API
+# remotely, since TrueNAS has a read-only rootfs and SSH runs inside a
+# container without access to the host middleware.
 #
-# Uses midclt API to:
+# Called by renew-and-distribute.sh (local receiver path).
+# Requires: TRUENAS_API_KEY in .env
+#
+# API flow:
 #   1. Import (or re-import) the certificate
 #   2. Set it as the active UI certificate
-#   3. Restart the web UI to pick up changes
+#   3. Restart the web UI
 
 set -euo pipefail
 
-CERT_SRC="${1:?Usage: $0 <cert-dir>}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../lib/common.sh"
+
+load_secrets
+
+CERT_DIR="${HOMELAB_DIR}/certs"
 CERT_NAME="homelab_wildcard"
-MIDCLT="midclt"
-export PATH="/usr/sbin:/sbin:${PATH}"
+API_BASE="http://truenas.internal.romaingrx.com/api/v2.0"
+API_KEY="${TRUENAS_API_KEY:?Missing TRUENAS_API_KEY in .env}"
 
-echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Installing cert to TrueNAS..."
+api() {
+    local method="$1" endpoint="$2"; shift 2
+    curl -fsSL -X "${method}" \
+        -H "Authorization: Bearer ${API_KEY}" \
+        -H "Content-Type: application/json" \
+        "${API_BASE}${endpoint}" "$@"
+}
 
-# Read cert and key
-FULLCHAIN=$(cat "${CERT_SRC}/fullchain.pem")
-PRIVKEY=$(cat "${CERT_SRC}/key.pem")
+log_info "Deploying cert to TrueNAS via API..."
+
+# Read cert and key files
+FULLCHAIN=$(cat "${CERT_DIR}/fullchain.pem")
+PRIVKEY=$(cat "${CERT_DIR}/key.pem")
 
 # Check if our named cert already exists
-EXISTING_ID=$($MIDCLT call certificate.query | \
-    python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((c['id'] for c in certs if c['name']=='${CERT_NAME}'), ''))")
+EXISTING_ID=$(api GET /certificate | \
+    python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((str(c['id']) for c in certs if c['name']=='${CERT_NAME}'), ''))")
 
 if [[ -n "${EXISTING_ID}" ]]; then
-    echo "  Updating existing certificate (id=${EXISTING_ID})..."
-    # Delete and recreate (TrueNAS doesn't support updating cert contents)
-    # First check if it's the active UI cert
-    UI_CERT_ID=$($MIDCLT call system.general.config | python3 -c "import sys,json; print(json.load(sys.stdin)['ui_certificate']['id'])")
+    log_info "Found existing certificate (id=${EXISTING_ID}), replacing..."
+
+    # Check if it's the active UI cert
+    UI_CERT_ID=$(api GET /system/general | python3 -c "import sys,json; print(json.load(sys.stdin)['ui_certificate']['id'])")
 
     if [[ "${UI_CERT_ID}" == "${EXISTING_ID}" ]]; then
-        # Switch UI back to default before deleting
-        DEFAULT_ID=$($MIDCLT call certificate.query | \
-            python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((c['id'] for c in certs if c['name']=='truenas_default'), ''))")
+        # Switch to default cert before deleting
+        DEFAULT_ID=$(api GET /certificate | \
+            python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((str(c['id']) for c in certs if c['name']=='truenas_default'), ''))")
         if [[ -n "${DEFAULT_ID}" ]]; then
-            $MIDCLT call system.general.update "{\"ui_certificate\": ${DEFAULT_ID}}" > /dev/null
+            api PUT /system/general -d "{\"ui_certificate\": ${DEFAULT_ID}}" > /dev/null
         fi
     fi
 
-    $MIDCLT call certificate.delete "${EXISTING_ID}" > /dev/null 2>&1 || true
-    echo "  Deleted old certificate"
+    api DELETE "/certificate/id/${EXISTING_ID}" -d '{"force": true}' > /dev/null 2>&1 || true
+    log_info "Deleted old certificate"
 fi
 
-# Build JSON payload with python to handle PEM escaping
+# Build JSON payload with python to handle PEM newlines
 PAYLOAD=$(python3 -c "
-import json, sys
-cert = open('${CERT_SRC}/fullchain.pem').read()
-key = open('${CERT_SRC}/key.pem').read()
+import json
+cert = open('${CERT_DIR}/fullchain.pem').read()
+key = open('${CERT_DIR}/key.pem').read()
 print(json.dumps({
     'name': '${CERT_NAME}',
     'create_type': 'CERTIFICATE_CREATE_IMPORTED',
@@ -58,30 +77,16 @@ print(json.dumps({
 ")
 
 # Import certificate
-echo "  Importing new certificate..."
-JOB_ID=$($MIDCLT call certificate.create "${PAYLOAD}")
-echo "  Import job: ${JOB_ID}"
-
-# Wait for the job to complete
-$MIDCLT call core.job_wait "${JOB_ID}" > /dev/null 2>&1 || true
-
-# Get the new certificate ID
-NEW_CERT_ID=$($MIDCLT call certificate.query | \
-    python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((c['id'] for c in certs if c['name']=='${CERT_NAME}'), ''))")
-
-if [[ -z "${NEW_CERT_ID}" ]]; then
-    echo "ERROR: Certificate import failed — cert not found after import"
-    exit 1
-fi
-
-echo "  New certificate id: ${NEW_CERT_ID}"
+log_info "Importing new certificate..."
+NEW_CERT_ID=$(api POST /certificate -d "${PAYLOAD}" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+log_info "Imported certificate id=${NEW_CERT_ID}"
 
 # Set as active UI certificate
-echo "  Setting as UI certificate..."
-$MIDCLT call system.general.update "{\"ui_certificate\": ${NEW_CERT_ID}}" > /dev/null
+log_info "Setting as UI certificate..."
+api PUT /system/general -d "{\"ui_certificate\": ${NEW_CERT_ID}}" > /dev/null
 
 # Restart the web UI
-echo "  Restarting web UI..."
-$MIDCLT call system.general.ui_restart > /dev/null 2>&1 || true
+log_info "Restarting web UI..."
+api GET /system/general/ui_restart > /dev/null 2>&1 || true
 
-echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] TrueNAS cert deployed, web UI restarting"
+log_info "TrueNAS cert deployed, web UI restarting"

@@ -100,6 +100,23 @@ while IFS= read -r entry; do
         continue
     fi
 
+    # Check for a local receiver (runs on UDM, e.g. API-based deploy)
+    if [[ -f "${HOMELAB_DIR}/receivers/${hostname}.sh" ]] \
+        && head -5 "${HOMELAB_DIR}/receivers/${hostname}.sh" | grep -q '# local-receiver'; then
+        log_info "Running local receiver for ${hostname}..."
+        bash "${HOMELAB_DIR}/receivers/${hostname}.sh" \
+            || { log_error "Local deploy to ${hostname} failed"; failures=$((failures + 1)); continue; }
+        deployed=$((deployed + 1))
+        continue
+    fi
+
+    # Check if SSH is reachable (5s timeout)
+    if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "${hostname}" "true" &>/dev/null; then
+        log_warn "Skipping ${hostname} (SSH not reachable)"
+        skipped=$((skipped + 1))
+        continue
+    fi
+
     # Use host-specific receiver if it exists, otherwise use generic
     receiver=""
     if [[ -f "${HOMELAB_DIR}/receivers/${hostname}.sh" ]]; then

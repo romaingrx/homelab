@@ -62,16 +62,24 @@ fi
 
 log_info "Certificate renewed, distributing to all hosts..."
 
+failures=0
+
 # --- Deploy to local UDM ---
-"${SCRIPT_DIR}/deploy-local.sh"
+"${SCRIPT_DIR}/deploy-local.sh" || { log_error "Local deploy failed"; failures=$((failures + 1)); }
 
 # --- Deploy to remote hosts ---
-# Add new hosts here as they are set up:
-"${SCRIPT_DIR}/deploy-remote.sh" proxmox receivers/proxmox.sh
+# Add new hosts here as they are set up.
+# Each deploy is independent — one failure won't block others.
+"${SCRIPT_DIR}/deploy-remote.sh" proxmox receivers/proxmox.sh \
+    || { log_error "Deploy to proxmox failed"; failures=$((failures + 1)); }
 
 # Future hosts (uncomment when ready):
-# "${SCRIPT_DIR}/deploy-remote.sh" carl receivers/proxmox.sh
-# "${SCRIPT_DIR}/deploy-remote.sh" k3s receivers/k3s.sh
-# "${SCRIPT_DIR}/deploy-remote.sh" hass receivers/hass.sh
+# "${SCRIPT_DIR}/deploy-remote.sh" carl receivers/proxmox.sh \
+#     || { log_error "Deploy to carl failed"; failures=$((failures + 1)); }
+
+if [[ "${failures}" -gt 0 ]]; then
+    log_error "=== Cert distribution finished with ${failures} failure(s) ==="
+    exit 1
+fi
 
 log_info "=== Cert renewal and distribution complete ==="

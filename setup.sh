@@ -42,13 +42,25 @@ log_info ".env OK"
 # --- Install acme.sh ---
 if [[ ! -x "${ACME_HOME}/acme.sh" ]]; then
     log_info "Installing acme.sh..."
-    if ! curl -fsSL https://get.acme.sh | sh -s -- \
-        --install-online \
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    if ! curl -fsSL -o "${tmp_dir}/install.tar.gz" \
+        "https://github.com/acmesh-official/acme.sh/archive/master.tar.gz"; then
+        rm -rf "${tmp_dir}"
+        die "Failed to download acme.sh"
+    fi
+    tar xzf "${tmp_dir}/install.tar.gz" -C "${tmp_dir}"
+    cd "${tmp_dir}/acme.sh-master"
+    if ! ./acme.sh --install \
         --home "${ACME_HOME}" \
         --nocron \
         --accountemail "${ACME_EMAIL:-}"; then
+        cd /
+        rm -rf "${tmp_dir}"
         die "acme.sh installation failed"
     fi
+    cd /
+    rm -rf "${tmp_dir}"
     log_info "acme.sh installed to ${ACME_HOME}"
 else
     log_info "acme.sh already installed at ${ACME_HOME}"

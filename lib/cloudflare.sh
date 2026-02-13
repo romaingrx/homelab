@@ -7,10 +7,6 @@ source "${SCRIPT_DIR}/common.sh"
 
 CF_API="https://api.cloudflare.com/client/v4"
 
-_cf_headers() {
-    echo -H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json"
-}
-
 # List all A records under a given name suffix.
 # Usage: cf_list_a_records "internal.romaingrx.com"
 # Returns: JSON array of {id, name, content(ip), ttl}
@@ -22,7 +18,8 @@ cf_list_a_records() {
     while true; do
         local resp
         resp=$(http_get \
-            $(_cf_headers) \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
             "${CF_API}/zones/${CF_ZONE_ID}/dns_records?type=A&per_page=${per_page}&page=${page}&name=contains:${suffix}") \
             || die "Failed to list Cloudflare DNS records (page ${page})"
 
@@ -47,7 +44,8 @@ cf_create_a_record() {
 
     local resp
     resp=$(http_post \
-        $(_cf_headers) \
+        -H "Authorization: Bearer ${CF_API_TOKEN}" \
+        -H "Content-Type: application/json" \
         -d "$(jq -nc --arg n "${name}" --arg c "${ip}" --argjson t "${ttl}" \
             '{type:"A", name:$n, content:$c, ttl:$t, proxied:false}')" \
         "${CF_API}/zones/${CF_ZONE_ID}/dns_records") || die "Failed to create A record for ${name}"
@@ -66,7 +64,8 @@ cf_update_a_record() {
 
     local resp
     resp=$(http_patch \
-        $(_cf_headers) \
+        -H "Authorization: Bearer ${CF_API_TOKEN}" \
+        -H "Content-Type: application/json" \
         -d "$(jq -nc --arg c "${ip}" --argjson t "${ttl}" \
             '{content:$c, ttl:$t, proxied:false}')" \
         "${CF_API}/zones/${CF_ZONE_ID}/dns_records/${record_id}") || die "Failed to update A record ${name}"
@@ -85,7 +84,8 @@ cf_delete_a_record() {
 
     local resp
     resp=$(http_delete \
-        $(_cf_headers) \
+        -H "Authorization: Bearer ${CF_API_TOKEN}" \
+        -H "Content-Type: application/json" \
         "${CF_API}/zones/${CF_ZONE_ID}/dns_records/${record_id}") || die "Failed to delete A record ${name}"
 
     local success

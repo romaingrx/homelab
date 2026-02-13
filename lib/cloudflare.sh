@@ -20,7 +20,7 @@ cf_list_a_records() {
         resp=$(http_get \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
-            "${CF_API}/zones/${CF_ZONE_ID}/dns_records?type=A&per_page=${per_page}&page=${page}&name=contains:${suffix}") \
+            "${CF_API}/zones/${CF_ZONE_ID}/dns_records?type=A&per_page=${per_page}&page=${page}") \
             || die "Failed to list Cloudflare DNS records (page ${page})"
 
         local records

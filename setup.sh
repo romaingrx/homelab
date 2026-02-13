@@ -42,7 +42,6 @@ log_info ".env OK"
 # --- Install acme.sh ---
 if [[ ! -x "${ACME_HOME}/acme.sh" ]]; then
     log_info "Installing acme.sh..."
-    local tmp_dir
     tmp_dir=$(mktemp -d)
     if ! curl -fsSL -o "${tmp_dir}/install.tar.gz" \
         "https://github.com/acmesh-official/acme.sh/archive/master.tar.gz"; then

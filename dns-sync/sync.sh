@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Sync Tailscale device hostnames -> dnsmasq hosts file
+# Sync Tailscale device hostnames -> dnsmasq address records
 # Each device gets: <hostname>.internal.romaingrx.com -> <tailscale-ipv4>
 #
-# Writes to a hosts file that dnsmasq reads. If the file changes,
-# dnsmasq is sent SIGHUP to reload.
+# Writes a dnsmasq config snippet with address= directives.
+# If the file changes, dnsmasq is restarted to pick up the new config.
 
 set -eo pipefail
 
@@ -15,7 +15,7 @@ source "${SCRIPT_DIR}/../lib/tailscale.sh"
 
 load_secrets
 
-HOSTS_FILE="${HOMELAB_DIR}/dns-sync/hosts"
+RECORDS_FILE="${HOMELAB_DIR}/dns-sync/records.conf"
 
 log_info "=== DNS sync starting ==="
 
@@ -29,23 +29,22 @@ if [[ "${device_count}" -eq 0 ]]; then
     exit 1
 fi
 
-# 2. Generate new hosts file content
-new_hosts=$(echo "${devices_json}" | jq -r '.[] | "\(.ipv4)\t\(.hostname).'"${DNS_SUFFIX}"'"' | sort)
+# 2. Generate dnsmasq address= config
+new_records=$(echo "${devices_json}" | jq -r '.[] | "address=/\(.hostname).'"${DNS_SUFFIX}"'/\(.ipv4)"' | sort)
 
 # 3. Compare with existing file and update if changed
-if [[ -f "${HOSTS_FILE}" ]] && [[ "$(cat "${HOSTS_FILE}")" == "${new_hosts}" ]]; then
+if [[ -f "${RECORDS_FILE}" ]] && [[ "$(cat "${RECORDS_FILE}")" == "${new_records}" ]]; then
     log_info "=== DNS sync complete: no changes ==="
     exit 0
 fi
 
-echo "${new_hosts}" > "${HOSTS_FILE}"
-log_info "Updated ${HOSTS_FILE} with ${device_count} entries"
+echo "${new_records}" > "${RECORDS_FILE}"
+log_info "Updated ${RECORDS_FILE} with ${device_count} entries"
 
-# 4. Reload dnsmasq if running
-if pidof dnsmasq-homelab &>/dev/null || systemctl is-active --quiet homelab-dnsmasq 2>/dev/null; then
-    # SIGHUP causes dnsmasq to re-read hosts files
-    systemctl kill --signal=SIGHUP homelab-dnsmasq 2>/dev/null || true
-    log_info "Sent SIGHUP to homelab-dnsmasq"
+# 4. Restart dnsmasq to pick up new config (conf-file requires restart, not SIGHUP)
+if systemctl is-active --quiet homelab-dnsmasq 2>/dev/null; then
+    systemctl restart homelab-dnsmasq
+    log_info "Restarted homelab-dnsmasq"
 fi
 
 log_info "=== DNS sync complete: ${device_count} records written ==="

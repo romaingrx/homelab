@@ -92,6 +92,9 @@ done
 
 systemctl daemon-reload
 
+# --- Ensure records.conf exists (dnsmasq needs it at startup) ---
+touch "${HOMELAB_DIR}/dns-sync/records.conf"
+
 # --- Issue initial cert if needed ---
 if [[ ! -f "${HOMELAB_DIR}/certs/fullchain.pem" ]]; then
     log_info "No existing cert found, issuing initial wildcard certificate..."

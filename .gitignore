@@ -3,5 +3,5 @@
 certs/*.pem
 certs/*.key
 logs/
-dns-sync/hosts
+dns-sync/records.conf
 .ts_token

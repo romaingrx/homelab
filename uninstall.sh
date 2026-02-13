@@ -61,7 +61,7 @@ if [[ "${PURGE}" == "true" ]]; then
     log_info "Purging acme.sh and cached data..."
     rm -rf "${HOMELAB_DIR}/.acme.sh"
     rm -f  "${HOMELAB_DIR}/.ts_token"
-    rm -f  "${HOMELAB_DIR}/dns-sync/hosts"
+    rm -f  "${HOMELAB_DIR}/dns-sync/records.conf"
     rm -rf "${HOMELAB_DIR}/certs/"*.pem "${HOMELAB_DIR}/certs/"*.key
     rm -rf "${HOMELAB_DIR}/logs"
     log_info "Purge complete"

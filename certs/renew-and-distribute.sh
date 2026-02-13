@@ -14,9 +14,9 @@
 
 set -eo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../lib/common.sh"
-source "${SCRIPT_DIR}/../lib/tailscale.sh"
+CERTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${CERTS_DIR}/../lib/common.sh"
+source "${CERTS_DIR}/../lib/tailscale.sh"
 
 load_secrets
 
@@ -75,7 +75,7 @@ deployed=0
 skipped=0
 
 # --- Deploy to local UDM ---
-"${SCRIPT_DIR}/deploy-local.sh" \
+"${CERTS_DIR}/deploy-local.sh" \
     || { log_error "Local deploy failed"; failures=$((failures + 1)); }
 deployed=$((deployed + 1))
 
@@ -106,7 +106,7 @@ while IFS= read -r entry; do
         receiver="receivers/${hostname}.sh"
     fi
 
-    "${SCRIPT_DIR}/deploy-remote.sh" "${hostname}" ${receiver} \
+    "${CERTS_DIR}/deploy-remote.sh" "${hostname}" ${receiver} \
         || { log_error "Deploy to ${hostname} failed"; failures=$((failures + 1)); continue; }
     deployed=$((deployed + 1))
 done < <(echo "${server_devices}" | jq -c '.[]')

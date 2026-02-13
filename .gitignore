@@ -1,0 +1,5 @@
+.env
+.acme.sh/
+certs/*.pem
+certs/*.key
+logs/

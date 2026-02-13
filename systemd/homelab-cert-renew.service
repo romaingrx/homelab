@@ -1,0 +1,11 @@
+[Unit]
+Description=Homelab certificate renewal and distribution
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/data/homelab/certs/renew-and-distribute.sh
+WorkingDirectory=/data/homelab
+StandardOutput=journal
+StandardError=journal

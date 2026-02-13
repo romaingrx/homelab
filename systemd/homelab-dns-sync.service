@@ -1,0 +1,11 @@
+[Unit]
+Description=Homelab DNS sync (Tailscale -> Cloudflare)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/data/homelab/dns-sync/sync.sh
+WorkingDirectory=/data/homelab
+StandardOutput=journal
+StandardError=journal

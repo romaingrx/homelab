@@ -5,14 +5,13 @@
 # What it does:
 #   1. Validates prerequisites (jq, curl, .env)
 #   2. Installs acme.sh (if not present)
-#   3. Registers acme.sh account with Let's Encrypt
-#   4. Installs systemd timer units
-#   5. Issues initial wildcard cert (if not present)
-#   6. Runs initial DNS sync
+#   3. Installs systemd units (dnsmasq, timers)
+#   4. Issues initial wildcard cert (if not present)
+#   5. Runs initial DNS sync + starts dnsmasq
 #
 # Usage: sudo ./setup.sh
 
-set -euo pipefail
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
@@ -30,6 +29,7 @@ require_cmd jq
 require_cmd openssl
 require_cmd ssh
 require_cmd scp
+require_cmd dnsmasq
 
 # --- Validate .env ---
 log_info "Validating .env..."
@@ -38,6 +38,10 @@ if [[ ! -f "${HOMELAB_DIR}/.env" ]]; then
 fi
 load_secrets
 log_info ".env OK"
+
+# --- Make scripts executable ---
+log_info "Setting script permissions..."
+find "${HOMELAB_DIR}" -name '*.sh' -exec chmod +x {} \;
 
 # --- Install acme.sh ---
 if [[ ! -x "${ACME_HOME}/acme.sh" ]]; then
@@ -63,13 +67,19 @@ if [[ ! -x "${ACME_HOME}/acme.sh" ]]; then
     log_info "acme.sh installed to ${ACME_HOME}"
 else
     log_info "acme.sh already installed at ${ACME_HOME}"
-    # Upgrade to latest
     "${ACME_HOME}/acme.sh" --upgrade --home "${ACME_HOME}" || true
 fi
 
 # --- Install systemd units ---
 log_info "Installing systemd units..."
-for unit in homelab-dns-sync.service homelab-dns-sync.timer homelab-cert-renew.service homelab-cert-renew.timer; do
+units=(
+    homelab-dnsmasq.service
+    homelab-dns-sync.service
+    homelab-dns-sync.timer
+    homelab-cert-renew.service
+    homelab-cert-renew.timer
+)
+for unit in "${units[@]}"; do
     src="${HOMELAB_DIR}/systemd/${unit}"
     dest="${SYSTEMD_DIR}/${unit}"
     if [[ ! -f "${src}" ]]; then
@@ -81,15 +91,6 @@ for unit in homelab-dns-sync.service homelab-dns-sync.timer homelab-cert-renew.s
 done
 
 systemctl daemon-reload
-
-# Enable and start timers
-systemctl enable --now homelab-dns-sync.timer
-systemctl enable --now homelab-cert-renew.timer
-log_info "Systemd timers enabled and started"
-
-# --- Make scripts executable ---
-log_info "Setting script permissions..."
-find "${HOMELAB_DIR}" -name '*.sh' -exec chmod +x {} \;
 
 # --- Issue initial cert if needed ---
 if [[ ! -f "${HOMELAB_DIR}/certs/fullchain.pem" ]]; then
@@ -105,17 +106,25 @@ fi
 log_info "Running initial DNS sync..."
 "${HOMELAB_DIR}/dns-sync/sync.sh"
 
+# --- Start services ---
+log_info "Starting services..."
+systemctl enable --now homelab-dnsmasq
+systemctl enable --now homelab-dns-sync.timer
+systemctl enable --now homelab-cert-renew.timer
+log_info "All services started"
+
 log_info "========================================="
 log_info "  Setup complete!"
 log_info "========================================="
 log_info ""
-log_info "Timers active:"
-log_info "  systemctl list-timers 'homelab-*'"
+log_info "Services:"
+log_info "  systemctl status homelab-dnsmasq       # DNS server"
+log_info "  systemctl list-timers 'homelab-*'      # timers"
 log_info ""
 log_info "Manual triggers:"
-log_info "  systemctl start homelab-dns-sync    # sync DNS now"
-log_info "  systemctl start homelab-cert-renew  # renew + distribute now"
+log_info "  systemctl start homelab-dns-sync       # sync DNS now"
+log_info "  systemctl start homelab-cert-renew     # renew + distribute now"
 log_info ""
-log_info "Logs:"
-log_info "  journalctl -u homelab-dns-sync -e"
-log_info "  journalctl -u homelab-cert-renew -e"
+log_info "IMPORTANT: Configure Tailscale split DNS:"
+log_info "  Tailscale admin -> DNS -> Split DNS"
+log_info "  Add: internal.romaingrx.com -> 100.71.235.104"

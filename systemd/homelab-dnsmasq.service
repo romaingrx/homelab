@@ -1,0 +1,16 @@
+[Unit]
+Description=Homelab dnsmasq (internal.romaingrx.com on Tailscale)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=forking
+ExecStartPre=/usr/sbin/dnsmasq --test --conf-file=/data/homelab/dns-sync/dnsmasq.conf
+ExecStart=/usr/sbin/dnsmasq --conf-file=/data/homelab/dns-sync/dnsmasq.conf
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/run/homelab-dnsmasq.pid
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -3,3 +3,5 @@
 certs/*.pem
 certs/*.key
 logs/
+dns-sync/hosts
+.ts_token

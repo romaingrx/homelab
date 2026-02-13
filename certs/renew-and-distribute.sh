@@ -6,6 +6,7 @@
 #
 # Remote hosts are auto-discovered from the Tailscale API. For each host:
 #   - Skip if it's the local UDM
+#   - If a local receiver exists (marked '# local-receiver'), run it on the UDM
 #   - Skip if SSH is unreachable (Tailscale SSH not enabled, offline, etc.)
 #   - If a matching receiver script exists in receivers/<hostname>.sh, use it
 #   - Otherwise just copy the cert files to /etc/homelab-certs/
@@ -90,13 +91,6 @@ while IFS= read -r entry; do
 
     # Skip self
     if [[ "${hostname}" == "${LOCAL_HOSTNAME}" ]]; then
-        continue
-    fi
-
-    # Check if SSH is reachable (5s timeout)
-    if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "${hostname}" "true" &>/dev/null; then
-        log_warn "Skipping ${hostname} (SSH not reachable)"
-        skipped=$((skipped + 1))
         continue
     fi
 

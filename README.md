@@ -11,10 +11,11 @@ Tailscale API  --->  UDM Pro (controller)  --->  dnsmasq (hosts file)
                          |                            |
                     acme.sh (Let's Encrypt)    Tailscale split DNS
                          |                            |
-              +----------+----------+      All tailnet devices resolve
-              |          |          |      *.internal.romaingrx.com
-           UDM Pro   Proxmox    (future)   via UDM's dnsmasq
-         (local)   (Tailscale SSH)
+              +----------+----------+------+   All tailnet devices resolve
+              |          |          |      |   *.internal.romaingrx.com
+           UDM Pro   Proxmox   TrueNAS  (future)   via UDM's dnsmasq
+         (local)   (Tailscale  (REST API)
+                     SSH)
 ```
 
 DNS resolution:
@@ -63,7 +64,9 @@ A dedicated dnsmasq instance runs on the UDM's Tailscale IP, serving `*.internal
 Fetches all Tailscale devices via OAuth API, writes updated hosts file, sends SIGHUP to dnsmasq.
 
 ### Cert Renewal (daily 3:30 AM)
-Checks if the `*.internal.romaingrx.com` wildcard cert needs renewal (via acme.sh + Cloudflare DNS-01), and if so distributes it to all configured hosts via Tailscale SSH.
+Checks if the `*.internal.romaingrx.com` wildcard cert needs renewal (via acme.sh + Cloudflare DNS-01), and if so distributes it to all `tag:server` devices. Supports two receiver types:
+- **Remote receivers** — deployed via Tailscale SSH (e.g. Proxmox)
+- **Local receivers** — run on the UDM directly, for hosts that can't accept SSH (e.g. TrueNAS via REST API). Marked with `# local-receiver` in the script header.
 
 ## Manual operations
 
@@ -89,12 +92,13 @@ dig proxmox.internal.romaingrx.com
 
 ## Adding a new device
 
-1. Install Tailscale: `curl -fsSL https://tailscale.com/install.sh | sh && tailscale up --ssh`
+1. Install Tailscale and tag as `tag:server`: `curl -fsSL https://tailscale.com/install.sh | sh && tailscale up --ssh`
 2. DNS appears automatically within 15 min (or trigger: `ssh udm systemctl start homelab-dns-sync`)
 3. If it needs HTTPS:
-   - Add a `deploy-remote.sh` line in `certs/renew-and-distribute.sh`
-   - Create a receiver script in `receivers/` (if needed)
-   - Push initial cert: `ssh udm /data/homelab/certs/renew-and-distribute.sh`
+   - Ensure the device has `tag:server` in Tailscale ACLs (cert auto-discovery uses this tag)
+   - Enable Tailscale SSH on the device (`tailscale set --ssh`), or create a local receiver if SSH is not possible
+   - Optionally create a receiver script in `receivers/<hostname>.sh` for host-specific cert installation
+   - Push initial cert: `ssh udm systemctl start homelab-cert-renew`
 4. Commit and push
 
 ## Verification
@@ -106,8 +110,9 @@ dig proxmox.internal.romaingrx.com
 # Cert is valid
 openssl x509 -in /data/homelab/certs/fullchain.pem -noout -subject -enddate
 
-# HTTPS works on Proxmox
+# HTTPS works on Proxmox / TrueNAS
 curl -sI https://proxmox.internal.romaingrx.com:8006
+curl -sI https://truenas.internal.romaingrx.com
 
 # Services are running
 systemctl status homelab-dnsmasq
@@ -144,6 +149,7 @@ homelab/
     deploy-remote.sh    # SCP cert to remote host via Tailscale SSH
   receivers/
     proxmox.sh          # Post-deploy on Proxmox (pveproxy reload)
+    truenas.sh          # TrueNAS cert via REST API (local receiver)
     k3s.sh              # Future: k8s TLS secret
     hass.sh             # Future: Home Assistant
   systemd/

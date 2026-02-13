@@ -41,7 +41,7 @@ load_secrets() {
     source "${env_file}"
     set +a
 
-    local required=(TS_OAUTH_CLIENT_ID TS_OAUTH_CLIENT_SECRET CF_API_TOKEN)
+    local required=(TS_OAUTH_CLIENT_ID TS_OAUTH_CLIENT_SECRET CF_API_TOKEN CF_ZONE_ID)
     for var in "${required[@]}"; do
         [[ -n "${!var:-}" ]] || die "Missing required secret: ${var}"
     done

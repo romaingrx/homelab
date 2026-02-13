@@ -36,10 +36,6 @@ api() {
 
 log_info "Deploying cert to TrueNAS via API..."
 
-# Read cert and key files
-FULLCHAIN=$(cat "${CERT_DIR}/fullchain.pem")
-PRIVKEY=$(cat "${CERT_DIR}/key.pem")
-
 # Check if our named cert already exists
 EXISTING_ID=$(api GET /certificate | \
     python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((str(c['id']) for c in certs if c['name']=='${CERT_NAME}'), ''))")

@@ -59,7 +59,13 @@ if [[ -n "${EXISTING_ID}" ]]; then
         fi
     fi
 
-    api DELETE "/certificate/id/${EXISTING_ID}" -d '{"force": true}' > /dev/null 2>&1 || true
+    DEL_JOB=$(api DELETE "/certificate/id/${EXISTING_ID}" -d 'true')
+    for i in $(seq 1 15); do
+        DEL_STATE=$(api GET "/core/get_jobs?id=${DEL_JOB}" | python3 -c "import sys,json; j=json.load(sys.stdin); print(j[0]['state'] if j else 'UNKNOWN')")
+        if [[ "${DEL_STATE}" == "SUCCESS" ]]; then break; fi
+        if [[ "${DEL_STATE}" == "FAILED" ]]; then log_warn "Delete job failed, continuing anyway"; break; fi
+        sleep 1
+    done
     log_info "Deleted old certificate"
 fi
 

@@ -68,7 +68,7 @@ for fqdn in "${!desired_records[@]}"; do
         else
             cf_create_a_record "${fqdn}" "${desired_ip}" "${DNS_TTL}"
         fi
-        (( created++ ))
+        created=$((created + 1))
     elif [[ "${existing_ips[${fqdn}]}" != "${desired_ip}" ]]; then
         # Record exists with wrong IP -> update
         if [[ "${DRY_RUN}" == "true" ]]; then
@@ -76,9 +76,9 @@ for fqdn in "${!desired_records[@]}"; do
         else
             cf_update_a_record "${existing_ids[${fqdn}]}" "${fqdn}" "${desired_ip}" "${DNS_TTL}"
         fi
-        (( updated++ ))
+        updated=$((updated + 1))
     else
-        (( unchanged++ ))
+        unchanged=$((unchanged + 1))
     fi
 done
 
@@ -94,7 +94,7 @@ for fqdn in "${!existing_ips[@]}"; do
         else
             cf_delete_a_record "${existing_ids[${fqdn}]}" "${fqdn}"
         fi
-        (( deleted++ ))
+        deleted=$((deleted + 1))
     fi
 done
 

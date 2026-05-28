@@ -10,14 +10,14 @@ Homelab infrastructure automation running on a **UniFi Dream Machine Pro (UDM Pr
 - **Tailscale** — mesh VPN connecting all devices; MagicDNS split DNS routes `internal.romaingrx.com` queries to UDM's dnsmasq
 - **dnsmasq** — listens on the UDM's Tailscale IP (`100.71.235.104:53`), serves `<hostname>.internal.romaingrx.com` -> Tailscale IP mappings
 - **acme.sh** — issues/renews wildcard cert `*.internal.romaingrx.com` via Let's Encrypt DNS-01 (Cloudflare)
-- **Cert distribution** — auto-discovers `tag:server` Tailscale devices and deploys certs via SSH or local receivers
+- **Cert distribution** — auto-discovers `tag:server` Tailscale devices and deploys certs via SSH or local receivers. Hosts are addressed by **Tailscale IP** (the UDM can't resolve names); offline hosts are skipped, not failed
 
 ## Key paths
 
 | Path | Description |
 |------|-------------|
 | `lib/common.sh` | Shared utilities: logging, secrets loading, HTTP helpers |
-| `lib/tailscale.sh` | Tailscale OAuth API: token management, device listing |
+| `lib/tailscale.sh` | Tailscale OAuth API (token, device listing, `ts_device_ip`) + on-device CLI helpers (`ts_self_ip`, `ts_online_ipv4s`) |
 | `lib/cloudflare.sh` | Cloudflare DNS API: CRUD for A records |
 | `dns-sync/sync.sh` | Tailscale devices -> dnsmasq records (runs every 15 min) |
 | `dns-sync/config.sh` | DNS domain suffix and TTL config |
@@ -68,7 +68,7 @@ All secrets are in `.env` (gitignored). Template: `.env.example`. Required:
 
 ## TrueNAS specifics
 
-TrueNAS Scale has a **read-only root filesystem** — no native package installs. Tailscale runs as a **container app** (not on the host), so Tailscale SSH connects to the container, not the host. The cert receiver uses the **TrueNAS REST API** (`http://truenas/api/v2.0`) instead of SSH. The TrueNAS middleware API (`midclt call`) is the primary way to manage the system when SSH'd in as `truenas_admin`.
+TrueNAS Scale has a **read-only root filesystem** — no native package installs. Tailscale runs as a **container app** (not on the host), so Tailscale SSH connects to the container, not the host. The cert receiver uses the **TrueNAS REST API** (`http://<tailscale-ip>/api/v2.0`, IP discovered automatically) instead of SSH. The TrueNAS middleware API (`midclt call`) is the primary way to manage the system when SSH'd in as `truenas_admin`.
 
 ## Common tasks
 
@@ -79,10 +79,10 @@ systemctl start homelab-dns-sync       # force DNS sync
 systemctl start homelab-cert-renew     # force cert renewal + distribution
 journalctl -u homelab-cert-renew -e    # check cert logs
 
-# Deploy cert to a single host manually
+# Deploy cert to a single host manually (use the Tailscale IP, not a hostname)
 cd /data/homelab
-bash certs/deploy-remote.sh proxmox receivers/proxmox.sh
-bash receivers/truenas.sh              # local receiver, runs on UDM
+bash certs/deploy-remote.sh "$(tailscale ip -4 proxmox)" receivers/proxmox.sh
+bash receivers/truenas.sh              # local receiver, runs on UDM (discovers TrueNAS IP)
 
 # Check services
 systemctl status homelab-dnsmasq
@@ -91,8 +91,9 @@ systemctl list-timers 'homelab-*'
 
 ## Gotchas
 
-- UDM's own DNS resolver does NOT use the local dnsmasq — use Tailscale MagicDNS hostnames (e.g. `truenas`) or IPs when scripting on the UDM
+- UDM's own DNS resolver does NOT use the local dnsmasq, AND it cannot resolve bare Tailscale MagicDNS names either (`getent hosts truenas` fails). When scripting on the UDM you MUST use **Tailscale IPs** — discover them via the API (`ts_device_ip <host>`) or `tailscale status --json`. Never SSH/curl a bare hostname from the UDM.
 - TrueNAS certificate API is async — `POST /certificate` returns a job ID, must poll `/core/get_jobs` until complete
 - TrueNAS cert delete is also async and must complete before re-importing with the same name
 - `truenas_admin` user on TrueNAS cannot use passwordless sudo — use `midclt call` instead for privileged operations
 - acme.sh uses `CF_Token` (not `CF_API_TOKEN`) — the scripts re-export as needed
+- **UniFi Core cert ownership**: this repo deploys the `*.internal.romaingrx.com` wildcard to UniFi Core (`deploy-local.sh`). If a Tailscale cert auto-deploy (`tailscale serve`/`tailscale cert` hooks, or a separate `tailscale-cert-deploy.service`) also targets UniFi Core, the two will fight over `unifi-core.crt`. Pick one owner — keep the wildcard for internal access and disable any competing Tailscale-cert deploy to UniFi Core.

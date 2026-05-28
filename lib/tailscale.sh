@@ -61,3 +61,15 @@ ts_list_devices() {
         tags: (.tags // [])
     }] | map(select(.ipv4 != null))'
 }
+
+# Tailscale IPv4 for a device, by hostname (via the API device list).
+ts_device_ip() {
+    local name="${1:?ts_device_ip: hostname required}"
+    ts_list_devices | jq -r --arg h "${name}" '.[] | select(.hostname == $h) | .ipv4' | head -1
+}
+
+# This node's own Tailscale IPv4 (empty if the tailscale CLI is unavailable).
+ts_self_ip() {
+    command -v tailscale &>/dev/null || return 0
+    tailscale ip -4 2>/dev/null | grep -m1 '^100\.' || true
+}

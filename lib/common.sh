@@ -70,7 +70,25 @@ http_delete() {
     curl -fsSL --retry 3 --retry-delay 2 -X DELETE "$@"
 }
 
-# --- Misc ---
+# We connect by Tailscale IP, so accept-new trusts a host's key on first
+# contact (it's never pre-seeded) and persists it in a repo-local known_hosts.
+SSH_OPTS=(
+    -o ConnectTimeout=5
+    -o BatchMode=yes
+    -o StrictHostKeyChecking=accept-new
+    -o "UserKnownHostsFile=${HOMELAB_DIR}/.known_hosts"
+)
+
+# Reachability via ping, not Tailscale's Online flag, which we've seen report
+# false negatives for hosts that are actually up.
+host_reachable() {
+    ping -c1 -W2 "$1" &>/dev/null
+}
+
+# File mtime in epoch seconds (GNU stat, then BSD stat).
+mtime() {
+    stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1"
+}
 
 require_cmd() {
     command -v "$1" &>/dev/null || die "Required command not found: $1"

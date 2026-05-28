@@ -85,6 +85,11 @@ host_reachable() {
     ping -c1 -W2 "$1" &>/dev/null
 }
 
+# File mtime in epoch seconds (GNU stat, then BSD stat).
+mtime() {
+    stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1"
+}
+
 require_cmd() {
     command -v "$1" &>/dev/null || die "Required command not found: $1"
 }

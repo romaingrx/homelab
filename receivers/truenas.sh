@@ -42,65 +42,59 @@ api() {
         "${API_BASE}${endpoint}" "$@"
 }
 
+# First certificate id matching a name, or empty.
+cert_id_by_name() {
+    api GET /certificate | jq -r --arg n "$1" 'first(.[] | select(.name == $n) | .id) // empty'
+}
+
+# Poll a middleware job until it leaves the running state. Returns non-zero on
+# FAILED or timeout. Usage: wait_for_job <id> [tries]
+wait_for_job() {
+    local id="$1" tries="${2:-30}" state i
+    for ((i = 0; i < tries; i++)); do
+        state=$(api GET "/core/get_jobs?id=${id}" | jq -r 'first(.[].state) // "UNKNOWN"')
+        case "${state}" in
+            SUCCESS) return 0 ;;
+            FAILED)  return 1 ;;
+        esac
+        sleep 1
+    done
+    return 1
+}
+
 log_info "Deploying cert to TrueNAS via API (${API_BASE})..."
 
-# Check if our named cert already exists
-EXISTING_ID=$(api GET /certificate | \
-    python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((str(c['id']) for c in certs if c['name']=='${CERT_NAME}'), ''))")
-
+EXISTING_ID=$(cert_id_by_name "${CERT_NAME}")
 if [[ -n "${EXISTING_ID}" ]]; then
     log_info "Found existing certificate (id=${EXISTING_ID}), replacing..."
 
-    # Check if it's the active UI cert
-    UI_CERT_ID=$(api GET /system/general | python3 -c "import sys,json; print(json.load(sys.stdin)['ui_certificate']['id'])")
-
+    # If it's the active UI cert, switch away before deleting
+    UI_CERT_ID=$(api GET /system/general | jq -r '.ui_certificate.id')
     if [[ "${UI_CERT_ID}" == "${EXISTING_ID}" ]]; then
-        # Switch to default cert before deleting
-        DEFAULT_ID=$(api GET /certificate | \
-            python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((str(c['id']) for c in certs if c['name']=='truenas_default'), ''))")
+        DEFAULT_ID=$(cert_id_by_name truenas_default)
         if [[ -n "${DEFAULT_ID}" ]]; then
             api PUT /system/general -d "{\"ui_certificate\": ${DEFAULT_ID}}" > /dev/null
         fi
     fi
 
     DEL_JOB=$(api DELETE "/certificate/id/${EXISTING_ID}" -d 'true')
-    for i in $(seq 1 15); do
-        DEL_STATE=$(api GET "/core/get_jobs?id=${DEL_JOB}" | python3 -c "import sys,json; j=json.load(sys.stdin); print(j[0]['state'] if j else 'UNKNOWN')")
-        if [[ "${DEL_STATE}" == "SUCCESS" ]]; then break; fi
-        if [[ "${DEL_STATE}" == "FAILED" ]]; then log_warn "Delete job failed, continuing anyway"; break; fi
-        sleep 1
-    done
+    wait_for_job "${DEL_JOB}" 15 || log_warn "Delete job did not succeed, continuing anyway"
     log_info "Deleted old certificate"
 fi
 
-# Build JSON payload with python to handle PEM newlines
-PAYLOAD=$(python3 -c "
-import json
-cert = open('${CERT_DIR}/fullchain.pem').read()
-key = open('${CERT_DIR}/key.pem').read()
-print(json.dumps({
-    'name': '${CERT_NAME}',
-    'create_type': 'CERTIFICATE_CREATE_IMPORTED',
-    'certificate': cert,
-    'privatekey': key
-}))
-")
+# --rawfile reads each PEM into a JSON string with newlines encoded correctly
+PAYLOAD=$(jq -n \
+    --arg name "${CERT_NAME}" \
+    --rawfile cert "${CERT_DIR}/fullchain.pem" \
+    --rawfile key  "${CERT_DIR}/key.pem" \
+    '{name: $name, create_type: "CERTIFICATE_CREATE_IMPORTED", certificate: $cert, privatekey: $key}')
 
-# Import certificate (API returns a job ID, wait then fetch cert by name)
 log_info "Importing new certificate..."
 JOB_ID=$(api POST /certificate -d "${PAYLOAD}")
 log_info "Import job id=${JOB_ID}, waiting..."
+wait_for_job "${JOB_ID}" 30 || die "Certificate import job failed"
 
-# Poll job until complete
-for i in $(seq 1 30); do
-    JOB_STATE=$(api GET "/core/get_jobs?id=${JOB_ID}" | python3 -c "import sys,json; j=json.load(sys.stdin); print(j[0]['state'] if j else 'UNKNOWN')")
-    if [[ "${JOB_STATE}" == "SUCCESS" ]]; then break; fi
-    if [[ "${JOB_STATE}" == "FAILED" ]]; then die "Certificate import job failed"; fi
-    sleep 1
-done
-
-NEW_CERT_ID=$(api GET /certificate | \
-    python3 -c "import sys,json; certs=json.load(sys.stdin); print(next((str(c['id']) for c in certs if c['name']=='${CERT_NAME}'), ''))")
+NEW_CERT_ID=$(cert_id_by_name "${CERT_NAME}")
 [[ -n "${NEW_CERT_ID}" ]] || die "Certificate not found after import"
 log_info "Imported certificate id=${NEW_CERT_ID}"
 

@@ -30,37 +30,35 @@ for f in fullchain.pem key.pem; do
     [[ -f "${CERT_DIR}/${f}" ]] || die "Missing ${CERT_DIR}/${f}"
 done
 
+rsh()  { ssh "${SSH_OPTS[@]}" "${TARGET_HOST}" "$@"; }
+push() { scp "${SSH_OPTS[@]}" -q "$@"; }
+
 log_info "Deploying cert to ${TARGET_HOST} via Tailscale SSH..."
 
-# Create temp dir on remote
-ssh "${SSH_OPTS[@]}" "${TARGET_HOST}" "mkdir -p ${REMOTE_TMP}" \
-    || die "Cannot SSH to ${TARGET_HOST}"
+rsh "mkdir -p ${REMOTE_TMP}" || die "Cannot SSH to ${TARGET_HOST}"
 
-# Copy cert files
-scp "${SSH_OPTS[@]}" -q "${CERT_DIR}/fullchain.pem" "${CERT_DIR}/key.pem" "${TARGET_HOST}:${REMOTE_TMP}/" \
+# Tear down the remote temp dir on exit, even if a later step fails
+trap 'rsh "rm -rf ${REMOTE_TMP}" 2>/dev/null || true' EXIT
+
+push "${CERT_DIR}/fullchain.pem" "${CERT_DIR}/key.pem" "${TARGET_HOST}:${REMOTE_TMP}/" \
     || die "Failed to SCP cert files to ${TARGET_HOST}"
 
 if [[ -n "${RECEIVER}" ]]; then
-    # Run host-specific receiver script
     local_receiver="${HOMELAB_DIR}/${RECEIVER}"
     [[ -f "${local_receiver}" ]] || die "Receiver script not found: ${local_receiver}"
 
-    scp "${SSH_OPTS[@]}" -q "${local_receiver}" "${TARGET_HOST}:${REMOTE_TMP}/receiver.sh" \
+    push "${local_receiver}" "${TARGET_HOST}:${REMOTE_TMP}/receiver.sh" \
         || die "Failed to SCP receiver script to ${TARGET_HOST}"
 
-    ssh "${SSH_OPTS[@]}" "${TARGET_HOST}" "chmod +x ${REMOTE_TMP}/receiver.sh && ${REMOTE_TMP}/receiver.sh ${REMOTE_TMP}" \
+    rsh "chmod +x ${REMOTE_TMP}/receiver.sh && ${REMOTE_TMP}/receiver.sh ${REMOTE_TMP}" \
         || die "Receiver script failed on ${TARGET_HOST}"
 else
-    # Generic install: copy to standard location
-    ssh "${SSH_OPTS[@]}" "${TARGET_HOST}" "mkdir -p ${REMOTE_CERT_DIR} && \
+    rsh "mkdir -p ${REMOTE_CERT_DIR} && \
         cp ${REMOTE_TMP}/fullchain.pem ${REMOTE_CERT_DIR}/fullchain.pem && \
         cp ${REMOTE_TMP}/key.pem ${REMOTE_CERT_DIR}/key.pem && \
         chmod 644 ${REMOTE_CERT_DIR}/fullchain.pem && \
         chmod 600 ${REMOTE_CERT_DIR}/key.pem" \
         || die "Failed to install certs on ${TARGET_HOST}"
 fi
-
-# Clean up
-ssh "${SSH_OPTS[@]}" "${TARGET_HOST}" "rm -rf ${REMOTE_TMP}"
 
 log_info "Remote deploy to ${TARGET_HOST} complete"

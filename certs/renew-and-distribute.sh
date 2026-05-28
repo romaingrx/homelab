@@ -30,10 +30,7 @@ log_info "=== Cert renewal check starting ==="
 
 # Record mtime before renewal attempt
 before_mtime=0
-if [[ -f "${CERT_DIR}/fullchain.pem" ]]; then
-    before_mtime=$(stat -c '%Y' "${CERT_DIR}/fullchain.pem" 2>/dev/null \
-        || stat -f '%m' "${CERT_DIR}/fullchain.pem")
-fi
+[[ -f "${CERT_DIR}/fullchain.pem" ]] && before_mtime=$(mtime "${CERT_DIR}/fullchain.pem")
 
 # acme.sh uses CF_Token
 export CF_Token="${CF_API_TOKEN}"
@@ -56,10 +53,7 @@ fi
 
 # Check if cert actually changed
 after_mtime=0
-if [[ -f "${CERT_DIR}/fullchain.pem" ]]; then
-    after_mtime=$(stat -c '%Y' "${CERT_DIR}/fullchain.pem" 2>/dev/null \
-        || stat -f '%m' "${CERT_DIR}/fullchain.pem")
-fi
+[[ -f "${CERT_DIR}/fullchain.pem" ]] && after_mtime=$(mtime "${CERT_DIR}/fullchain.pem")
 
 if [[ "${before_mtime}" == "${after_mtime}" ]] && [[ "${before_mtime}" != "0" ]]; then
     log_info "Certificate unchanged, skipping distribution"

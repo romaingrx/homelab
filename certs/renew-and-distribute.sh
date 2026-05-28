@@ -4,12 +4,10 @@
 # 1. Run acme.sh --cron to renew if needed (exits 0 even if no renewal)
 # 2. If the cert was renewed (mtime changed), distribute to all reachable hosts
 #
-# Remote hosts are auto-discovered from the Tailscale API. For each host:
-#   - Skip if it's the local UDM
-#   - If a local receiver exists (marked '# local-receiver'), run it on the UDM
-#   - Skip if SSH is unreachable (Tailscale SSH not enabled, offline, etc.)
-#   - If a matching receiver script exists in receivers/<hostname>.sh, use it
-#   - Otherwise just copy the cert files to /etc/homelab-certs/
+# Hosts are discovered from the Tailscale API and addressed by Tailscale IP
+# (the UDM cannot resolve bare hostnames). Each tag:server device: skip self
+# and unreachable hosts; run a local receiver on the UDM if one exists (marked
+# '# local-receiver'), else deploy over Tailscale SSH.
 #
 # Called by: homelab-cert-renew.timer (daily 3:30 AM)
 
@@ -86,40 +84,60 @@ server_devices=$(echo "${devices_json}" | jq -c '[.[] | select(.tags | index("ta
 server_count=$(echo "${server_devices}" | jq 'length')
 log_info "Found ${server_count} devices tagged tag:server"
 
+# Self is matched by IP: the UDM's Linux hostname differs from its Tailscale
+# hostname, so a hostname comparison would never match.
+self_ip=$(ts_self_ip)
+[[ -n "${self_ip}" ]] && log_info "This node's Tailscale IP: ${self_ip}"
+
 while IFS= read -r entry; do
     hostname=$(echo "${entry}" | jq -r '.hostname')
+    ipv4=$(echo "${entry}" | jq -r '.ipv4')
 
-    # Skip self
-    if [[ "${hostname}" == "${LOCAL_HOSTNAME}" ]]; then
+    # Skip self (by IP; hostname fallback if self IP unknown)
+    if { [[ -n "${self_ip}" ]] && [[ "${ipv4}" == "${self_ip}" ]]; } \
+        || [[ "${hostname}" == "${LOCAL_HOSTNAME}" ]]; then
+        log_info "Skipping self (${hostname}/${ipv4})"
         continue
     fi
 
-    # Check for a local receiver (runs on UDM, e.g. API-based deploy)
-    if [[ -f "${HOMELAB_DIR}/receivers/${hostname}.sh" ]] \
-        && head -5 "${HOMELAB_DIR}/receivers/${hostname}.sh" | grep -q '# local-receiver'; then
-        log_info "Running local receiver for ${hostname}..."
-        bash "${HOMELAB_DIR}/receivers/${hostname}.sh" \
-            || { log_error "Local deploy to ${hostname} failed"; failures=$((failures + 1)); continue; }
-        deployed=$((deployed + 1))
-        continue
-    fi
-
-    # Check if SSH is reachable (5s timeout)
-    if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "${hostname}" "true" &>/dev/null; then
-        log_warn "Skipping ${hostname} (SSH not reachable)"
+    # Skip unreachable hosts (a skip, not a failure)
+    if ! host_reachable "${ipv4}"; then
+        log_warn "Skipping ${hostname} (${ipv4}): unreachable"
         skipped=$((skipped + 1))
         continue
     fi
 
-    # Use host-specific receiver if it exists, otherwise use generic
-    receiver=""
-    if [[ -f "${HOMELAB_DIR}/receivers/${hostname}.sh" ]]; then
-        receiver="receivers/${hostname}.sh"
+    receiver_file="${HOMELAB_DIR}/receivers/${hostname}.sh"
+
+    # Local receiver runs on the UDM; pass the target IP so it needn't resolve names.
+    if [[ -f "${receiver_file}" ]] && head -5 "${receiver_file}" | grep -q '# local-receiver'; then
+        log_info "Running local receiver for ${hostname} (target ${ipv4})..."
+        if TS_TARGET_IP="${ipv4}" bash "${receiver_file}"; then
+            deployed=$((deployed + 1))
+        else
+            log_error "Local deploy to ${hostname} failed"
+            failures=$((failures + 1))
+        fi
+        continue
     fi
 
-    "${CERTS_DIR}/deploy-remote.sh" "${hostname}" ${receiver} \
-        || { log_error "Deploy to ${hostname} failed"; failures=$((failures + 1)); continue; }
-    deployed=$((deployed + 1))
+    # Remote deploy over Tailscale SSH; skip hosts that don't accept SSH
+    if ! ssh "${SSH_OPTS[@]}" "${ipv4}" "true" &>/dev/null; then
+        log_warn "Skipping ${hostname} (${ipv4}): SSH not reachable"
+        skipped=$((skipped + 1))
+        continue
+    fi
+
+    # Host-specific receiver if present, else generic copy
+    receiver=""
+    [[ -f "${receiver_file}" ]] && receiver="receivers/${hostname}.sh"
+
+    if "${CERTS_DIR}/deploy-remote.sh" "${ipv4}" ${receiver}; then
+        deployed=$((deployed + 1))
+    else
+        log_error "Deploy to ${hostname} (${ipv4}) failed"
+        failures=$((failures + 1))
+    fi
 done < <(echo "${server_devices}" | jq -c '.[]')
 
 log_info "Deployed to ${deployed} hosts, skipped ${skipped}, failed ${failures}"

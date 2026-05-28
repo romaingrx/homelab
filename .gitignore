@@ -5,3 +5,4 @@ certs/*.key
 logs/
 dns-sync/records.conf
 .ts_token
+.known_hosts

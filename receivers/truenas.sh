@@ -18,23 +18,31 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/common.sh"
+source "${SCRIPT_DIR}/../lib/tailscale.sh"
 
 load_secrets
 
 CERT_DIR="${HOMELAB_DIR}/certs"
 CERT_NAME="homelab_wildcard"
-API_BASE="http://truenas/api/v2.0"
 API_KEY="${TRUENAS_API_KEY:?Missing TRUENAS_API_KEY in .env}"
+
+# Target by Tailscale IP (the UDM can't resolve names); orchestrator sets TS_TARGET_IP.
+TARGET_IP="${TS_TARGET_IP:-}"
+if [[ -z "${TARGET_IP}" ]]; then
+    TARGET_IP=$(ts_device_ip truenas)
+fi
+[[ -n "${TARGET_IP}" ]] || die "Could not determine TrueNAS Tailscale IP (device unknown/offline)"
+API_BASE="http://${TARGET_IP}/api/v2.0"
 
 api() {
     local method="$1" endpoint="$2"; shift 2
-    curl -fsSL -X "${method}" \
+    curl -fsSL --connect-timeout 10 --max-time 120 -X "${method}" \
         -H "Authorization: Bearer ${API_KEY}" \
         -H "Content-Type: application/json" \
         "${API_BASE}${endpoint}" "$@"
 }
 
-log_info "Deploying cert to TrueNAS via API..."
+log_info "Deploying cert to TrueNAS via API (${API_BASE})..."
 
 # Check if our named cert already exists
 EXISTING_ID=$(api GET /certificate | \

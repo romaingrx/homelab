@@ -28,9 +28,12 @@ require_cmd "${ACME_HOME}/acme.sh"
 
 log_info "=== Cert renewal check starting ==="
 
-# Record mtime before renewal attempt
-before_mtime=0
-[[ -f "${CERT_DIR}/fullchain.pem" ]] && before_mtime=$(mtime "${CERT_DIR}/fullchain.pem")
+# Record the cert content hash before renewal. mtime is useless here: acme.sh
+# --install-cert rewrites the files on every run (bumping mtime) even when no
+# renewal happened, so only a content hash distinguishes a real renewal from a
+# no-op reinstall.
+before_hash=""
+[[ -f "${CERT_DIR}/fullchain.pem" ]] && before_hash=$(sha256 "${CERT_DIR}/fullchain.pem")
 
 # acme.sh uses CF_Token
 export CF_Token="${CF_API_TOKEN}"
@@ -51,11 +54,11 @@ if [[ -d "${ACME_HOME}/${DOMAIN}_ecc" ]]; then
         --home "${ACME_HOME}"
 fi
 
-# Check if cert actually changed
-after_mtime=0
-[[ -f "${CERT_DIR}/fullchain.pem" ]] && after_mtime=$(mtime "${CERT_DIR}/fullchain.pem")
+# Distribute only if the cert content actually changed
+after_hash=""
+[[ -f "${CERT_DIR}/fullchain.pem" ]] && after_hash=$(sha256 "${CERT_DIR}/fullchain.pem")
 
-if [[ "${before_mtime}" == "${after_mtime}" ]] && [[ "${before_mtime}" != "0" ]]; then
+if [[ "${before_hash}" == "${after_hash}" ]] && [[ -n "${before_hash}" ]]; then
     log_info "Certificate unchanged, skipping distribution"
     log_info "=== Cert renewal check complete (no renewal) ==="
     exit 0

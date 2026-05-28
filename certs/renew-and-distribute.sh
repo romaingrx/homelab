@@ -83,7 +83,9 @@ log_info "Found ${server_count} devices tagged tag:server"
 self_ip=$(ts_self_ip)
 [[ -n "${self_ip}" ]] && log_info "This node's Tailscale IP: ${self_ip}"
 
-while IFS= read -r entry; do
+# Read from FD 3, not stdin: ssh inside the loop would otherwise drain the
+# piped device list and truncate iteration after the first host it connects to.
+while IFS= read -r entry <&3; do
     hostname=$(echo "${entry}" | jq -r '.hostname')
     ipv4=$(echo "${entry}" | jq -r '.ipv4')
 
@@ -132,7 +134,7 @@ while IFS= read -r entry; do
         log_error "Deploy to ${hostname} (${ipv4}) failed"
         failures=$((failures + 1))
     fi
-done < <(echo "${server_devices}" | jq -c '.[]')
+done 3< <(echo "${server_devices}" | jq -c '.[]')
 
 log_info "Deployed to ${deployed} hosts, skipped ${skipped}, failed ${failures}"
 

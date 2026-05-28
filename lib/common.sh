@@ -90,6 +90,15 @@ mtime() {
     stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1"
 }
 
+# SHA-256 hex digest of a file's contents (GNU coreutils, then BSD/macOS shasum).
+sha256() {
+    if command -v sha256sum &>/dev/null; then
+        sha256sum "$1" | cut -d' ' -f1
+    else
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
 require_cmd() {
     command -v "$1" &>/dev/null || die "Required command not found: $1"
 }

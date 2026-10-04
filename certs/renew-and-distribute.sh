@@ -5,7 +5,7 @@
 # 2. If the cert was renewed (mtime changed), distribute to all reachable hosts
 #
 # Hosts are discovered from the Tailscale API and addressed by Tailscale IP
-# (the UDM cannot resolve bare hostnames). Each tag:server device: skip self
+# (the UDM cannot resolve bare hostnames). Each tag:tls device: skip self
 # and unreachable hosts; run a local receiver on the UDM if one exists (marked
 # '# local-receiver'), else deploy over Tailscale SSH.
 #
@@ -75,11 +75,12 @@ skipped=0
     || { log_error "Local deploy failed"; failures=$((failures + 1)); }
 deployed=$((deployed + 1))
 
-# --- Auto-discover and deploy to all tag:server devices ---
+# --- Auto-discover and deploy to all tag:tls devices ---
+# tag:tls = receives the wildcard cert (README, "Tailscale tags").
 devices_json=$(ts_list_devices)
-server_devices=$(echo "${devices_json}" | jq -c '[.[] | select(.tags | index("tag:server"))]')
-server_count=$(echo "${server_devices}" | jq 'length')
-log_info "Found ${server_count} devices tagged tag:server"
+tls_devices=$(echo "${devices_json}" | jq -c '[.[] | select(.tags | index("tag:tls"))]')
+tls_count=$(echo "${tls_devices}" | jq 'length')
+log_info "Found ${tls_count} devices tagged tag:tls"
 
 # Self is matched by IP: the UDM's Linux hostname differs from its Tailscale
 # hostname, so a hostname comparison would never match.
@@ -137,7 +138,7 @@ while IFS= read -r entry <&3; do
         log_error "Deploy to ${hostname} (${ipv4}) failed"
         failures=$((failures + 1))
     fi
-done 3< <(echo "${server_devices}" | jq -c '.[]')
+done 3< <(echo "${tls_devices}" | jq -c '.[]')
 
 log_info "Deployed to ${deployed} hosts, skipped ${skipped}, failed ${failures}"
 

@@ -64,9 +64,18 @@ A dedicated dnsmasq instance runs on the UDM's Tailscale IP, serving `*.internal
 Fetches all Tailscale devices via OAuth API, writes updated hosts file, sends SIGHUP to dnsmasq.
 
 ### Cert Renewal (daily 3:30 AM)
-Checks if the `*.internal.romaingrx.com` wildcard cert needs renewal (via acme.sh + Cloudflare DNS-01), and if so distributes it to all `tag:server` devices. Supports two receiver types:
+Checks if the `*.internal.romaingrx.com` wildcard cert needs renewal (via acme.sh + Cloudflare DNS-01), and if so distributes it to all `tag:tls` devices. Supports two receiver types:
 - **Remote receivers** — deployed via Tailscale SSH (e.g. Proxmox)
 - **Local receivers** — run on the UDM directly, for hosts that can't accept SSH (e.g. TrueNAS via REST API). Marked with `# local-receiver` in the script header.
+
+### Tailscale tags
+Each tag is one role; a device carries every role it plays, and gets the union of their rules.
+
+| Tag | Role | The tailnet policy allows |
+|-----|------|---------------------------|
+| `tag:controller` | The UDM: internal DNS, issues and pushes the cert | Your devices and `tag:server` to query its DNS (53) |
+| `tag:tls` | Receives the wildcard cert | `tag:controller` to ping it, SSH as `root` (remote receivers), reach port 80 (TrueNAS API, `receivers/truenas.sh`) |
+| `tag:server` | A homelab machine you administer | Your own devices; servers do **not** reach each other |
 
 ## Manual operations
 
@@ -92,10 +101,10 @@ dig proxmox.internal.romaingrx.com
 
 ## Adding a new device
 
-1. Install Tailscale and tag as `tag:server`: `curl -fsSL https://tailscale.com/install.sh | sh && tailscale up --ssh`
+1. Install Tailscale and tag as `tag:server`: `curl -fsSL https://tailscale.com/install.sh | sh && tailscale up --ssh --advertise-tags=tag:server`
 2. DNS appears automatically within 15 min (or trigger: `ssh udm systemctl start homelab-dns-sync`)
 3. If it needs HTTPS:
-   - Ensure the device has `tag:server` in Tailscale ACLs (cert auto-discovery uses this tag)
+   - Add `tag:tls` to the device and keep `tag:server` (admin console: Machines → device → Edit ACL tags). Cert auto-discovery uses this tag, see Tailscale tags above
    - Enable Tailscale SSH on the device (`tailscale set --ssh`), or create a local receiver if SSH is not possible
    - Optionally create a receiver script in `receivers/<hostname>.sh` for host-specific cert installation
    - Push initial cert: `ssh udm systemctl start homelab-cert-renew`

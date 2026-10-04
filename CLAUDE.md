@@ -10,7 +10,7 @@ Homelab infrastructure automation running on a **UniFi Dream Machine Pro (UDM Pr
 - **Tailscale** — mesh VPN connecting all devices; MagicDNS split DNS routes `internal.romaingrx.com` queries to UDM's dnsmasq
 - **dnsmasq** — listens on the UDM's Tailscale IP (`100.71.235.104:53`), serves `<hostname>.internal.romaingrx.com` -> Tailscale IP mappings
 - **acme.sh** — issues/renews wildcard cert `*.internal.romaingrx.com` via Let's Encrypt DNS-01 (Cloudflare)
-- **Cert distribution** — auto-discovers `tag:server` Tailscale devices and deploys certs via SSH or local receivers. Hosts are addressed by **Tailscale IP** (the UDM can't resolve names); offline hosts are skipped, not failed
+- **Cert distribution** — auto-discovers `tag:tls` Tailscale devices and deploys certs via SSH or local receivers. Hosts are addressed by **Tailscale IP** (the UDM can't resolve names); offline hosts are skipped, not failed
 
 ## Key paths
 
@@ -53,7 +53,7 @@ All secrets are in `.env` (gitignored). Template: `.env.example`. Required:
 - Logging via `log_info`, `log_warn`, `log_error`, `die`
 - HTTP calls via `http_get`, `http_post`, etc. (curl with retries)
 - Secrets loaded via `load_secrets` which validates `.env` permissions (600) and required vars
-- Device discovery uses Tailscale API with `tag:server` filter
+- Device discovery uses Tailscale API with `tag:tls` filter (tags: README, "Tailscale tags")
 - Hardcoded domain: `internal.romaingrx.com`
 
 ## Current infrastructure
